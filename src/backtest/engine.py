@@ -43,7 +43,8 @@ def simulate(signals: pd.DataFrame, config: Config, start: int = 0, end: int | N
         raise ValueError("Invalid timeframe")
     interval = pd.Timedelta(seconds=interval_seconds)
     cfg, risk = config.execution, config.risk
-    rate = cfg.taker_fee_rate + cfg.tax_rate
+    buy_rate = cfg.taker_buy_fee_rate + cfg.buy_tax_rate
+    sell_rate = cfg.taker_sell_fee_rate + cfg.sell_tax_rate
     slip = cfg.slippage_rate
     cash = config.backtest.initial_equity_idr
     initial = cash
@@ -58,7 +59,7 @@ def simulate(signals: pd.DataFrame, config: Config, start: int = 0, end: int | N
         nonlocal cash, position
         price = raw_price * (1 - slip)
         gross = position['amount'] * price
-        fee = gross * rate
+        fee = gross * sell_rate
         cash += gross - fee
         pnl = gross - fee - position['cost']
         trades.append(dict(entry_time=position['time'], exit_time=ts,
@@ -88,10 +89,11 @@ def simulate(signals: pd.DataFrame, config: Config, start: int = 0, end: int | N
             stop = entry - atr * config.strategy.atr_stop_multiplier
             if math.isfinite(atr) and atr > 0 and stop > 0:
                 target = entry + (entry - stop) * config.strategy.risk_reward
-                qty = position_size(cash, entry, stop, risk.risk_per_trade, cfg.taker_fee_rate,
-                                    cfg.tax_rate, slip, cash)
+                qty = position_size(cash, entry, stop, risk.risk_per_trade, cfg.taker_buy_fee_rate,
+                                    cfg.buy_tax_rate, slip, cash,
+                                    sell_fee_rate=cfg.taker_sell_fee_rate, sell_tax_rate=cfg.sell_tax_rate)
                 if qty > 0:
-                    fee = qty * entry * rate
+                    fee = qty * entry * buy_rate
                     cost = qty * entry + fee
                     cash -= cost
                     position = dict(time=row.timestamp, price=entry, amount=qty, stop=stop,
@@ -108,7 +110,7 @@ def simulate(signals: pd.DataFrame, config: Config, start: int = 0, end: int | N
         if i == end - 1 and position:
             # Candle timestamp denotes open; exit is at its close.
             close_position(row['close'], row.timestamp + interval, 'end_of_segment')
-        mark = cash if not position else cash + position['amount'] * row['close'] * (1 - slip) * (1 - rate)
+        mark = cash if not position else cash + position['amount'] * row['close'] * (1 - slip) * (1 - sell_rate)
         decision = evaluate(risk_state, mark, today, risk)
         risk_state, allow_entry = decision.state, decision.allow_entry
         previous_equity = mark

@@ -13,7 +13,7 @@ pip install -r requirements.txt
 python -m pytest -q
 ```
 
-Atur `config/config.yaml`. Rate fee, pajak dan slippage adalah **fraksi** (0.001 = 0.1%); nilai fee dan pajak yang disediakan hanyalah contoh, bukan informasi terkini. Periksa tarif, cakupan, serta cara perhitungan fee dan pajak terbaru di Indodax sebelum dipakai. Simulator saat ini mengasumsikan taker fee dan pajak proporsional atas nilai transaksi di **setiap sisi**, dan slippage proporsional pada kedua sisi; aturan aktual bisa berbeda. Maker fee disimpan untuk pengembangan berikutnya, tetapi tidak digunakan dalam simulasi.
+Atur `config/config.yaml`. Rate fee, pajak dan slippage adalah **fraksi** (0.001 = 0.1%); nilai fee dan pajak yang disediakan hanyalah contoh, bukan informasi terkini. Periksa tarif, cakupan, serta cara perhitungan fee dan pajak terbaru di Indodax sebelum dipakai. Simulator memakai fee dan pajak proporsional atas nilai transaksi, dengan pengaturan **beli dan jual terpisah**, serta slippage proporsional pada kedua sisi; aturan aktual bisa berbeda. Kolom `taker_buy_fee_rate`, `taker_sell_fee_rate`, `buy_tax_rate`, dan `sell_tax_rate` wajib disetel setelah verifikasi. Jika suatu tarif resmi sudah all-in (termasuk pajak), jangan tambahkan pajak yang sama untuk kedua kalinya. Maker fee juga dapat dikonfigurasi terpisah tetapi tidak digunakan dalam simulasi taker. Struktur konfigurasi biaya baru ini menggantikan `maker_fee_rate`, `taker_fee_rate`, dan `tax_rate` lama; konfigurasi kustom lama perlu dimigrasikan secara manual, bukan ditimpa tanpa backup.
 
 ## Backtest
 

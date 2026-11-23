@@ -147,8 +147,10 @@ class PaperBot:
                     continue
                 balance = self.executor.balances()['IDR']
                 amount = position_size(current_equity, price, stop, self.config.risk.risk_per_trade,
-                                       self.config.execution.taker_fee_rate, self.config.execution.tax_rate,
-                                       self.config.execution.slippage_rate, balance)
+                                       self.config.execution.taker_buy_fee_rate, self.config.execution.buy_tax_rate,
+                                       self.config.execution.slippage_rate, balance,
+                                       sell_fee_rate=self.config.execution.taker_sell_fee_rate,
+                                       sell_tax_rate=self.config.execution.sell_tax_rate)
                 amount = float(self.executor.exchange.amount_to_precision(symbol, amount))
                 order = self.executor.place_order(f'entry:{symbol}:{candle_ms}', symbol, 'buy', amount, stop, quotes, now_ms)
                 event(self.log, 'entry_fill', symbol=symbol, amount=amount, price=order['price'], stop=stop, fee_tax=order['fee_tax'])

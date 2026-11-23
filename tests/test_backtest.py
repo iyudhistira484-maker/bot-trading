@@ -26,9 +26,10 @@ def test_next_open_fee_sizing_and_exit(candles, config):
     assert t.entry_time == s.timestamp.iloc[1] and t.exit_time == s.timestamp.iloc[3]
     assert t.entry_price == pytest.approx(110 * (1 + config.execution.slippage_rate))
     assert t.exit_price == pytest.approx(115 * (1 - config.execution.slippage_rate))
-    rate = config.execution.taker_fee_rate + config.execution.tax_rate
-    assert t.entry_fee_tax == pytest.approx(t.amount * t.entry_price * rate)
-    assert t.exit_fee_tax == pytest.approx(t.amount * t.exit_price * rate)
+    buy_rate = config.execution.taker_buy_fee_rate + config.execution.buy_tax_rate
+    sell_rate = config.execution.taker_sell_fee_rate + config.execution.sell_tax_rate
+    assert t.entry_fee_tax == pytest.approx(t.amount * t.entry_price * buy_rate)
+    assert t.exit_fee_tax == pytest.approx(t.amount * t.exit_price * sell_rate)
     assert result.equity.equity.iloc[-1] == pytest.approx(config.backtest.initial_equity_idr + t.pnl)
 
 
@@ -107,3 +108,17 @@ def test_kill_liquidates_at_next_open(candles, config):
     assert result.killed
     assert result.trades.iloc[0].exit_reason == 'kill_switch'
     assert result.trades.iloc[0].exit_time == s.timestamp.iloc[2]
+
+
+def test_backtest_separate_buy_and_sell_costs(candles, config):
+    cfg = config.execution
+    cfg.taker_buy_fee_rate, cfg.buy_tax_rate = .001, .002
+    cfg.taker_sell_fee_rate, cfg.sell_tax_rate = .004, .006
+    s = make_signals(candles); s.loc[0, 'entry'] = True
+    result = simulate(s, config)
+    trade = result.trades.iloc[0]
+    assert trade.entry_fee_tax == pytest.approx(trade.amount * trade.entry_price * .003)
+    assert trade.exit_fee_tax == pytest.approx(trade.amount * trade.exit_price * .01)
+    expected = trade.amount * (trade.exit_price * .99 - trade.entry_price * 1.003)
+    assert trade.pnl == pytest.approx(expected)
+    assert result.equity.equity.iloc[-1] == pytest.approx(config.backtest.initial_equity_idr + expected)

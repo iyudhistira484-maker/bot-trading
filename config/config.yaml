@@ -24,9 +24,12 @@ risk:
 execution:
   live_enabled: false
   # Example placeholders, not current Indodax fees or tax. Set after verification.
-  maker_fee_rate: 0.001
-  taker_fee_rate: 0.001
-  tax_rate: 0.0
+  maker_buy_fee_rate: 0.001
+  maker_sell_fee_rate: 0.001
+  taker_buy_fee_rate: 0.001
+  taker_sell_fee_rate: 0.001
+  buy_tax_rate: 0.0
+  sell_tax_rate: 0.0
   slippage_rate: 0.001
   max_spread_rate: 0.02
   max_price_deviation_rate: 0.02

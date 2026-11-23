@@ -34,3 +34,12 @@ def test_peak_trailing_drawdown(config):
     raised = evaluate(RiskState(today, 1000, 1000), 1200, today, config.risk)
     assert raised.state.peak_equity == 1200
     assert evaluate(raised.state, 1080, today, config.risk).state.killed
+
+
+def test_position_size_distinguishes_buy_and_sell_costs():
+    amount = position_size(10000, 100, 90, .01, .001, .002, .001, 10000,
+                           sell_fee_rate=.004, sell_tax_rate=.006)
+    unit_loss = 100 * 1.003 - 90 * .999 * .99
+    assert amount * unit_loss == pytest.approx(100)
+    with pytest.raises(ValueError):
+        position_size(10000, 100, 90, .01, sell_fee_rate=.8, sell_tax_rate=.2)

@@ -53,9 +53,12 @@ class RiskConfig(StrictModel):
 
 class ExecutionConfig(StrictModel):
     live_enabled: bool = False
-    maker_fee_rate: Rate
-    taker_fee_rate: Rate
-    tax_rate: Rate
+    maker_buy_fee_rate: Rate
+    maker_sell_fee_rate: Rate
+    taker_buy_fee_rate: Rate
+    taker_sell_fee_rate: Rate
+    buy_tax_rate: Rate
+    sell_tax_rate: Rate
     slippage_rate: Rate
     max_spread_rate: Rate
     max_price_deviation_rate: Rate
@@ -65,8 +68,12 @@ class ExecutionConfig(StrictModel):
 
     @model_validator(mode="after")
     def check_costs(self):
-        if self.taker_fee_rate + self.tax_rate >= 1 or self.maker_fee_rate + self.tax_rate >= 1:
-            raise ValueError("combined fee and tax must be below 100%")
+        for fee, tax in ((self.maker_buy_fee_rate, self.buy_tax_rate),
+                         (self.maker_sell_fee_rate, self.sell_tax_rate),
+                         (self.taker_buy_fee_rate, self.buy_tax_rate),
+                         (self.taker_sell_fee_rate, self.sell_tax_rate)):
+            if fee + tax >= 1:
+                raise ValueError("combined fee and tax must be below 100%")
         return self
 
 

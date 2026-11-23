@@ -110,7 +110,7 @@ class PaperExecutor:
             q = quotes[symbol]
             self._validate_quote(q, now_ms)
             cfg = self.config.execution
-            equity += position['amount'] * q.bid * (1 - cfg.slippage_rate) * (1 - cfg.taker_fee_rate - cfg.tax_rate)
+            equity += position['amount'] * q.bid * (1 - cfg.slippage_rate) * (1 - cfg.taker_sell_fee_rate - cfg.sell_tax_rate)
         from datetime import date
         stored = self.db.execute('SELECT * FROM risk_state WHERE id=1').fetchone()
         state = RiskState(date.fromisoformat(stored['day']), stored['day_start'], stored['peak'], bool(stored['killed']), bool(stored['daily_halted']))
@@ -195,7 +195,8 @@ class PaperExecutor:
             amount_max = market.get('limits', {}).get('amount', {}).get('max')
             if amount_max is not None and amount > amount_max:
                 raise OrderRejected('Above exchange amount maximum')
-            rate = cfg.taker_fee_rate + cfg.tax_rate
+            rate = (cfg.taker_buy_fee_rate + cfg.buy_tax_rate if side == 'buy'
+                    else cfg.taker_sell_fee_rate + cfg.sell_tax_rate)
             gross, fee = amount * price, amount * price * rate
             if not math.isfinite(gross) or not math.isfinite(fee):
                 raise OrderRejected('Non-finite order value')
@@ -207,7 +208,8 @@ class PaperExecutor:
                 if stop is None or not 0 < stop < price:
                     raise OrderRejected('Valid stop required')
                 max_amount = position_size(equity, price, stop, self.config.risk.risk_per_trade,
-                                           cfg.taker_fee_rate, cfg.tax_rate, cfg.slippage_rate, cash)
+                                           cfg.taker_buy_fee_rate, cfg.buy_tax_rate, cfg.slippage_rate, cash,
+                                           sell_fee_rate=cfg.taker_sell_fee_rate, sell_tax_rate=cfg.sell_tax_rate)
                 if amount > max_amount * (1 + 1e-12) or gross + fee > cash:
                     raise OrderRejected('Risk budget or cash exceeded')
                 self.db.execute('UPDATE account SET cash=? WHERE id=1', (cash - gross - fee,))

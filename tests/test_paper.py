@@ -31,7 +31,7 @@ def test_fills_fees_persist_and_idempotent(tmp_path, paper, quote, now, config):
     q = {'BTC/IDR': quote}
     order = paper.place_order('buy1', 'BTC/IDR', 'buy', 1, 90, q, now)
     assert order['price'] == pytest.approx(101 * (1 + config.execution.slippage_rate))
-    assert order['fee_tax'] == pytest.approx(order['price'] * (config.execution.taker_fee_rate + config.execution.tax_rate))
+    assert order['fee_tax'] == pytest.approx(order['price'] * (config.execution.taker_buy_fee_rate + config.execution.buy_tax_rate))
     cash = paper.balances()['IDR']
     assert paper.place_order('buy1', 'BTC/IDR', 'buy', 1, 90, q, now) == order
     assert paper.balances()['IDR'] == cash
@@ -98,3 +98,21 @@ def test_unknown_notional_fails_closed(paper, quote, now):
         paper.place_order('unknown', 'BTC/IDR', 'buy', 1, 90, {'BTC/IDR': quote}, now)
     paper.config.execution.min_notional_idr['BTC/IDR'] = 5
     assert paper.place_order('known', 'BTC/IDR', 'buy', 1, 90, {'BTC/IDR': quote}, now)['status'] == 'closed'
+
+
+def test_paper_uses_separate_buy_sell_rates_for_fill_and_equity(paper, quote, now):
+    cfg = paper.config.execution
+    cfg.taker_buy_fee_rate = .001
+    cfg.buy_tax_rate = .002
+    cfg.taker_sell_fee_rate = .004
+    cfg.sell_tax_rate = .006
+    quotes = {'BTC/IDR': quote}
+    buy = paper.place_order('asym-buy', 'BTC/IDR', 'buy', 1, 90, quotes, now)
+    assert buy['fee_tax'] == pytest.approx(buy['price'] * .003)
+    cash = paper.balances()['IDR']
+    _, marked_equity = paper.assess_risk(quotes, now)
+    expected_sell_price = quote.bid * (1 - cfg.slippage_rate)
+    assert marked_equity == pytest.approx(cash + expected_sell_price * .99)
+    sell = paper.place_order('asym-sell', 'BTC/IDR', 'sell', 1, None, quotes, now)
+    assert sell['fee_tax'] == pytest.approx(sell['price'] * .01)
+    assert paper.balances()['IDR'] == pytest.approx(cash + sell['price'] * .99)
