@@ -23,20 +23,23 @@ risk:
   max_capital_idr: 10000000.0
 execution:
   live_enabled: false
-  # Example placeholders, not current Indodax fees or tax. Set after verification.
-  maker_buy_fee_rate: 0.001
-  maker_sell_fee_rate: 0.001
-  taker_buy_fee_rate: 0.001
-  taker_sell_fee_rate: 0.001
+  # Paper example: IDR Pro fee table shown by user on 2026-11-23.
+  # Fee fields = service fee + CFX; tax is separate. Verify current rates.
+  maker_buy_fee_rate: 0.0010555
+  maker_sell_fee_rate: 0.0010555
+  taker_buy_fee_rate: 0.0020555
+  taker_sell_fee_rate: 0.0020555
   buy_tax_rate: 0.0
-  sell_tax_rate: 0.0
+  sell_tax_rate: 0.0021
   slippage_rate: 0.001
   max_spread_rate: 0.02
   max_price_deviation_rate: 0.02
   max_quote_age_seconds: 30
   max_candle_age_intervals: 2
-  # Required for paper if ccxt has no cost minimum. Verify each value with Indodax.
-  min_notional_idr: {}
+  # Paper-only assumption: IDR Pro minimum per public help page; the API's
+  # own minimum is not verified. This may reject small virtual exits too.
+  min_notional_idr:
+    BTC/IDR: 25000.0
 backtest:
   initial_equity_idr: 10000000.0
   in_sample_fraction: 0.7

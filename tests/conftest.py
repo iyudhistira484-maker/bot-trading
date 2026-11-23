@@ -7,7 +7,10 @@ from src.config import load_config
 
 @pytest.fixture
 def config():
-    return load_config()
+    cfg = load_config()
+    # Tiny synthetic prices do not represent real exchange order minimums.
+    cfg.execution.min_notional_idr = {}
+    return cfg
 
 
 @pytest.fixture

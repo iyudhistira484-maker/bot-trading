@@ -44,6 +44,7 @@ class FakeTelegram:
 @pytest.fixture
 def context(tmp_path):
     cfg = load_config()
+    cfg.execution.min_notional_idr = {}  # synthetic market has its own minimum
     cfg.runtime.entry_window_seconds = 60
     now = int(datetime.now(timezone.utc).timestamp() * 1000)
     # A recent close within the entry window; quote date must match database initialization.
