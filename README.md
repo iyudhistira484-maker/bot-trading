@@ -76,3 +76,25 @@ Eksperimen terpisah `python -m src.research.cost_atr --report PATH_REPORT` memba
 Pada sinyal candle yang sudah tutup, filter memperkirakan biaya satu putaran beli-jual pada harga close tersebut dengan fee/pajak taker dan slippage pada konfigurasi, tanpa spread. Rasio biaya per unit terhadap jarak stop `ATR × atr_stop_multiplier` harus **≤ 0,50**. Batas 0,50 adalah hipotesis tetap yang dipilih setelah hasil sebelumnya dilihat, bukan batas keamanan, nilai optimal, atau rekomendasi; estimasi bukan harga eksekusi aktual. Exit dan manajemen risiko tidak diubah. Jumlah sinyal ditampilkan sebelum simulasi; diblokirnya suatu sinyal tidak selalu berarti satu transaksi berkurang karena urutan dan posisi saling memengaruhi.
 
 Eksperimen ini eksploratif dan **bukan uji buta**: hasil periode ini dan sebagian out-of-sample sudah pernah dilihat. Jangan memilih filter berdasarkan hasil satu periode atau menganggap output sebagai bukti keuntungan. Evaluasi lanjutan memerlukan rancangan yang dibekukan sebelum data baru, termasuk pengujian pada periode masa depan yang belum dipakai memilih parameter. Backtest tidak memodelkan spread aktual, likuiditas, minimum order atau partial fills dan tidak menjamin hasil riil. Bot paper dan live tidak menggunakan filter ini.
+
+### Pengamatan shadow prospektif (tanpa order)
+
+`src.research.shadow` mencatat **sinyal dan keputusan hipotetis filter**, bukan posisi, order, PnL, atau bukti profit. Ia tidak membaca/menulis database paper, tidak memuat `.env`, tidak memanggil endpoint privat, dan tidak mengubah layanan bot. Fetch candle publik terpisah dapat menghasilkan hasil berbeda dari paper karena keterlambatan/revisi data, jeda warmup rolling 500 candle, pause/posisi/risk, atau pengaturan dashboard paper. Study memakai **snapshot YAML** yang dipilih saat init, bukan override dashboard; periksa kesesuaian sebelum membandingkan.
+
+Init membuat direktori study baru yang belum ada, dengan config dan SQLite sendiri; waktu mulai dan fingerprint kode/dependensi disimpan. Sample hanya mencatat candle yang **ditutup setelah init**, tidak backfill sinyal lama, menolak data kosong/gap/stale atau lebih dari 15 menit terlambat, dan tidak mencatat dua kali. Hitung candle terlewat pada observasi berikutnya. Status, waktu dan `journalctl` tetap harus dipantau: kegagalan/ketiadaan observasi, restart dan perubahan data bursa dapat mengurangi cakupan; candle terlewat yang belum diikuti observasi baru belum masuk hitungan. `Persistent=true` tidak mengisi kembali candle yang terlewat. Studi berhenti jika config, kode relevan atau versi dependensi berubah; evaluasi dan mulai study baru setelah review, jangan ubah metadata untuk menyamarkan perubahan. Code/hash bukan proteksi dari pengguna VPS yang sengaja memodifikasi file.
+
+Contoh khusus layout VPS ini, dari clone percobaan (bukan clone bot aktif), setelah tes lulus:
+
+```bash
+cd /home/indodaxbot/dashboard-test
+sudo -u indodaxbot /home/indodaxbot/indodax-bot/.venv/bin/python -m src.research.shadow init --dir /home/indodaxbot/shadow-cost-atr --config reports/btc-1tahun-20261123T054437Z/config_used.yaml
+sudo systemd-analyze verify deploy/vps/indodax-shadow.service deploy/vps/indodax-shadow.timer
+sudo cp deploy/vps/indodax-shadow.service deploy/vps/indodax-shadow.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now indodax-shadow.timer
+systemctl list-timers indodax-shadow.timer --all
+```
+
+Status tanpa jaringan: `sudo -u indodaxbot /home/indodaxbot/indodax-bot/.venv/bin/python -m src.research.shadow status --dir /home/indodaxbot/shadow-cost-atr`. Log: `journalctl -u indodax-shadow.service -n 30 --no-pager`. Jika bermasalah, `sudo systemctl disable --now indodax-shadow.timer` menghentikan jadwal shadow saja, tanpa menyentuh paper. Service oneshot biasanya `inactive` setelah berhasil; cek timer dan log, bukan menganggap service `inactive` sebagai kegagalan. Direktori study mengandung data lokal dan tidak perlu diunggah ke Git.
+
+Filter `≤ 0,50` dan biaya simulasi tetap hipotesis eksploratif yang dipilih setelah melihat data historis. Hasil observasi ke depan hanya mengukur keputusan sinyal, bukan kinerja trading. Jangan menyetel parameter berdasarkan hasil berjalan dan jangan aktifkan live karenanya; pengukuran hasil yang valid memerlukan rancangan evaluasi, asumsi eksekusi realistis, pemisahan data dan sampel memadai.

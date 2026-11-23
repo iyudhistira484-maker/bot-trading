@@ -1,0 +1,15 @@
+[Unit]
+Description=Independent cost filter shadow observer (no orders)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=indodaxbot
+Group=indodaxbot
+WorkingDirectory=/home/indodaxbot/dashboard-test
+Environment=HOME=/home/indodaxbot PYTHONUNBUFFERED=1
+ExecStart=/home/indodaxbot/indodax-bot/.venv/bin/python -m src.research.shadow sample --dir /home/indodaxbot/shadow-cost-atr
+TimeoutStartSec=180
+NoNewPrivileges=true
+UMask=0077
