@@ -6,9 +6,10 @@ import ccxt
 import pandas as pd
 
 from src.backtest.engine import run_split
+from src.backtest.history import fetch_indodax_history
 from src.backtest.report import write_report
 from src.config import load_config
-from src.data.ohlcv import fetch_history, load_csv, closed_candles, save_csv
+from src.data.ohlcv import load_csv, closed_candles, save_csv
 from src.strategy.ema import EMATrendStrategy
 
 
@@ -33,7 +34,7 @@ def main(argv: list[str] | None = None) -> None:
             raise ValueError('No closed candles')
     else:
         since = int(pd.to_datetime(args.since, utc=True).timestamp() * 1000)
-        data = fetch_history(ex, pair, config.market.timeframe, since, ex.milliseconds(), config.market.ohlcv_limit,
+        data = fetch_indodax_history(ex, pair, config.market.timeframe, since, ex.milliseconds(), config.market.ohlcv_limit,
                              config.market.retries, config.market.retry_delay_seconds)
     save_csv(data, f'{args.output}/candles.csv')
     train, test = run_split(data, EMATrendStrategy(config.strategy), config)

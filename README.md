@@ -17,7 +17,7 @@ Atur `config/config.yaml`. Rate fee, pajak dan slippage adalah **fraksi** (0.001
 
 ## Backtest
 
-Backtest satu pair per proses; setiap run memakai modal sendiri, bukan simulasi portofolio multipair. Sumber utama adalah OHLCV publik Indodax melalui ccxt. Ketersediaan dan jangkauan historis endpoint dapat terbatas; run gagal jika rentang yang diminta tidak lengkap atau ada celah. Jangan mengisi celah secara sintetis. Jika data kurang, impor CSV OHLCV dari sumber lain yang tepercaya untuk pair/timeframe yang sama, dengan memahami potensi perbedaan harga, likuiditas, dan zona waktu. Data sumber lain tidak otomatis kompatibel dengan Indodax.
+Backtest satu pair per proses; setiap run memakai modal sendiri, bukan simulasi portofolio multipair. Sumber utama adalah OHLCV publik Indodax melalui ccxt. Backtest membagi permintaan menjadi rentang terbatas untuk mengurangi pemotongan data lama; satuan `until` diuji terhadap adapter Indodax ccxt 4.5.93. Perilaku versi lain dan ketersediaan data tetap harus diverifikasi. Ketersediaan dan jangkauan historis endpoint dapat terbatas; run gagal jika rentang yang diminta tidak lengkap atau ada celah. Jangan mengisi celah secara sintetis. Jika data kurang, impor CSV OHLCV dari sumber lain yang tepercaya untuk pair/timeframe yang sama, dengan memahami potensi perbedaan harga, likuiditas, dan zona waktu. Data sumber lain tidak otomatis kompatibel dengan Indodax.
 
 ```bash
 python -m src.backtest.run --since 2024-01-01 --pair BTC/IDR --output reports/btc
