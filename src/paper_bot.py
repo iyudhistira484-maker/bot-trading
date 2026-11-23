@@ -17,12 +17,22 @@ class PaperBot:
     def __init__(self, executor: PaperExecutor, data, config: Config, logger: logging.Logger, telegram=None, clock=time.time):
         self.executor, self.data, self.config, self.log, self.telegram = executor, data, config, logger, telegram
         self.clock = clock
+        self._stop_requested = False
         self.strategy = EMATrendStrategy(config.strategy)
         self.db = executor.db
         self.db.executescript('''
             CREATE TABLE IF NOT EXISTS bot_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS bot_seen (symbol TEXT NOT NULL, candle_ms INTEGER NOT NULL, PRIMARY KEY(symbol, candle_ms));
         ''')
+
+    def request_stop(self) -> None:
+        """Signal-safe request: persistence and liquidation happen in the loop."""
+        self._stop_requested = True
+
+    def _persist_stop_request(self) -> None:
+        if self._stop_requested and self._get('stopping', '0') != '1':
+            self._set('stopping', '1')
+            event(self.log, 'stop_requested', source='signal')
 
     def _get(self, key: str, default: str = '') -> str:
         row = self.db.execute('SELECT value FROM bot_state WHERE key=?', (key,)).fetchone()
@@ -86,8 +96,10 @@ class PaperBot:
 
     def run_once(self, now_ms: int) -> bool:
         """One iteration. Return True only when stopped with no open position."""
+        self._persist_stop_request()
         self.process_commands()
         quotes, frames = self.data.snapshot(now_ms)
+        self._persist_stop_request()
         # Use the actual post-fetch time in production; tests can supply a deterministic clock.
         now_ms = max(now_ms, int(self.clock() * 1000))
         decision, equity = self.executor.assess_risk(quotes, now_ms)
@@ -129,6 +141,9 @@ class PaperBot:
             return False
         interval_ms = self.executor.exchange.parse_timeframe(self.config.market.timeframe) * 1000
         for symbol, row in signals.items():
+            self._persist_stop_request()
+            if self._stop_requested:
+                break
             if not bool(row['entry']) or symbol in self.executor.balances()['positions']:
                 continue
             candle_ms = int(row.timestamp.timestamp() * 1000)
@@ -152,6 +167,9 @@ class PaperBot:
                                        sell_fee_rate=self.config.execution.taker_sell_fee_rate,
                                        sell_tax_rate=self.config.execution.sell_tax_rate)
                 amount = float(self.executor.exchange.amount_to_precision(symbol, amount))
+                if self._stop_requested:
+                    self._persist_stop_request()
+                    break
                 order = self.executor.place_order(f'entry:{symbol}:{candle_ms}', symbol, 'buy', amount, stop, quotes, now_ms)
                 event(self.log, 'entry_fill', symbol=symbol, amount=amount, price=order['price'], stop=stop, fee_tax=order['fee_tax'])
                 self._notify(f'PAPER entry {symbol}: amount {amount}, price {order["price"]:.2f}, stop {stop:.2f}')
@@ -169,6 +187,7 @@ class PaperBot:
                     self._notify('PAPER stopped after liquidation; manual restart/review required.')
                     return
             except Exception as exc:
+                self._persist_stop_request()
                 # Do not log raw exception text: ccxt/requests may embed secrets.
                 event(self.log, 'iteration_error', error_type=type(exc).__name__)
                 self._notify(f'PAPER error: {type(exc).__name__}; entries suspended until next successful cycle')

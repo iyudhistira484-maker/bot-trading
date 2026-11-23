@@ -2,6 +2,7 @@
 import argparse
 import fcntl
 import os
+import signal
 from pathlib import Path
 import sys
 
@@ -85,6 +86,7 @@ def run_paper(args) -> int:
             telegram = Telegram(token, chat) if token and chat else None
             bot = PaperBot(executor, data, config, logger, telegram)
             reset_state(bot, args.reset_stop, args.reset_kill)
+            previous_sigterm = signal.signal(signal.SIGTERM, lambda _signum, _frame: bot.request_stop())
             try:
                 bot.run()
             except KeyboardInterrupt:
@@ -92,6 +94,8 @@ def run_paper(args) -> int:
                 bot._notify('PAPER interrupted: open positions, if any, are no longer monitored until restart.')
                 print('Paper stopped. Open positions may be unmonitored; review SQLite before restarting.', file=sys.stderr)
                 return 130
+            finally:
+                signal.signal(signal.SIGTERM, previous_sigterm)
         finally:
             executor.close()
     return 0

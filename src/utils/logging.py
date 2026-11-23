@@ -2,6 +2,7 @@
 from datetime import datetime, timezone
 import json
 import logging
+import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -12,6 +13,10 @@ def create_logger(path: str, max_bytes: int, backup_count: int) -> logging.Logge
     handler = RotatingFileHandler(path, maxBytes=max_bytes, backupCount=backup_count, encoding='utf-8')
     handler.setFormatter(logging.Formatter('%(message)s'))
     logger.addHandler(handler)
+    # systemd captures stdout for Cockpit; only structured, explicitly safe fields.
+    console = logging.StreamHandler(sys.stdout)
+    console.setFormatter(logging.Formatter('%(message)s'))
+    logger.addHandler(console)
     return logger
 
 

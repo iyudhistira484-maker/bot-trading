@@ -180,3 +180,37 @@ def test_default_mode_is_paper(monkeypatch):
     monkeypatch.setattr('src.main.run_paper', lambda args: calls.append(args) or 0)
     assert main([]) == 0
     assert len(calls) == 1
+
+
+def test_service_stop_request_liquidates_and_is_sticky(context):
+    bot, data, tg, now = context
+    bot.run_once(now)
+    assert bot.executor.balances()['positions']
+    bot.request_stop()
+    assert bot.run_once(now + 1) is True
+    assert not bot.executor.balances()['positions']
+    assert bot._get('stopping') == '1'
+    assert bot.db.execute('SELECT COUNT(*) AS n FROM orders').fetchone()['n'] == 2
+
+
+def test_stop_request_persists_even_if_data_unavailable(context):
+    bot, data, tg, now = context
+    bot.run_once(now)
+    bot.request_stop()
+    data.snapshot = lambda _: (_ for _ in ()).throw(TimeoutError())
+    with pytest.raises(TimeoutError):
+        bot.run_once(now + 1)
+    assert bot._get('stopping') == '1'
+    assert bot.executor.balances()['positions']
+
+
+def test_stop_request_during_data_fetch_prevents_entry(context):
+    bot, data, tg, now = context
+    original = data.snapshot
+    def snapshot_with_stop(ts):
+        bot.request_stop()
+        return original(ts)
+    data.snapshot = snapshot_with_stop
+    assert bot.run_once(now) is True
+    assert bot._get('stopping') == '1'
+    assert not bot.executor.balances()['positions']

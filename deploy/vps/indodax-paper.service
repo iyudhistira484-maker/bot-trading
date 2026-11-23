@@ -1,0 +1,20 @@
+[Unit]
+Description=Indodax Paper Trading (Virtual Only)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=indodaxbot
+Group=indodaxbot
+WorkingDirectory=/home/indodaxbot/indodax-bot
+Environment=HOME=/home/indodaxbot PYTHONUNBUFFERED=1
+ExecStart=/home/indodaxbot/indodax-bot/.venv/bin/python -m src.main paper
+Restart=on-failure
+RestartSec=30
+TimeoutStopSec=180
+NoNewPrivileges=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
