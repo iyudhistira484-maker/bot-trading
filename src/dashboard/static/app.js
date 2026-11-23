@@ -14,13 +14,17 @@ async function api(path, body) {
 }
 function showView(name) {
   document.querySelectorAll('.view').forEach(el => el.classList.toggle('hidden', el.id !== 'view-' + name));
-  document.querySelectorAll('.nav-item').forEach(el => el.classList.toggle('active', el.dataset.view === name));
-  const labels = {home:'Home', positions:'Posisi', history:'Riwayat', settings:'Pengaturan', control:'Kontrol'};
+  document.querySelectorAll('.nav-item').forEach(el => {
+    const active = el.dataset.view === name;
+    el.classList.toggle('active', active);
+    if (active) el.setAttribute('aria-current', 'page'); else el.removeAttribute('aria-current');
+  });
+  const labels = {home:'Ringkasan', positions:'Posisi', history:'Riwayat', settings:'Pengaturan', control:'Kontrol'};
   $('crumb-title').textContent = labels[name];
 }
 document.querySelectorAll('[data-view]').forEach(el => el.addEventListener('click', () => showView(el.dataset.view)));
 document.querySelectorAll('[data-go]').forEach(el => el.addEventListener('click', () => showView(el.dataset.go)));
-const statusNames = {active:'Service aktif', inactive:'Service berhenti', failed:'Service gagal', activating:'Service memulai', deactivating:'Service berhenti', unknown:'Status tidak diketahui'};
+const statusNames = {active:'Service aktif', inactive:'Service berhenti', failed:'Service gagal', activating:'Service memulai', deactivating:'Service sedang berhenti', unknown:'Status tidak diketahui'};
 function drawStatus(s) {
   $('equity').textContent = money(s.equity); $('cash').textContent = money(s.cash);
   $('last-updated').textContent = date(s.equity_updated_at) + (s.equity_updated_at ? ' · waktu lokal' : ' (belum ada data)');
@@ -39,16 +43,12 @@ function drawStatus(s) {
   if (!events.length) { const e = document.createElement('div'); e.className = 'empty'; e.textContent = 'Belum ada aktivitas di log yang tersedia.'; list.append(e); }
   for (const item of events) {
     const row = document.createElement('div'); row.className = 'activity-row';
-    const icon = document.createElement('span'); icon.className = 'activity-icon'; icon.textContent = item.event.includes('reject') || item.event.includes('error') || item.event === 'kill_switch' ? '!' : '↗';
+    const icon = document.createElement('span'); icon.className = 'activity-icon'; icon.textContent = item.event.includes('reject') || item.event.includes('error') || item.event === 'kill_switch' ? '!' : '•';
     const body = document.createElement('div'); const title = document.createElement('strong'); title.textContent = item.event.replaceAll('_', ' ');
     const detail = document.createElement('small'); detail.textContent = [item.symbol, item.reason, item.error_type, item.equity_idr != null ? money(item.equity_idr) : null].filter(Boolean).join(' · ') || 'Paper bot'; body.append(title, detail);
     const time = document.createElement('time'); time.textContent = date(item.time); row.append(icon, body, time); list.append(row);
   }
-  const values = s.events.filter(e => e.event === 'heartbeat' && Number.isFinite(e.equity_idr)).map(e => e.equity_idr);
-  const svg = $('equity-chart'); svg.replaceChildren(); $('chart-count').textContent = values.length + ' snapshot'; $('chart-empty').classList.toggle('hidden', values.length >= 2);
-  if (values.length >= 2) { const min = Math.min(...values), max = Math.max(...values), span = max-min || 1;
-    const line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline'); line.setAttribute('points', values.map((v,i) => `${i*600/(values.length-1)},${160-(v-min)/span*130}`).join(' ')); line.setAttribute('fill','none'); line.setAttribute('stroke','#7767ef'); line.setAttribute('stroke-width','3'); line.setAttribute('vector-effect','non-scaling-stroke'); svg.append(line);
-  }
+
 }
 function appendRow(tbody, values) { const tr = document.createElement('tr'); for (const value of values) { const td = document.createElement('td'); td.textContent = value; tr.append(td); } tbody.append(tr); }
 function drawHistory(orders) { const tbody = $('history-table'); tbody.replaceChildren(); for (const o of orders) appendRow(tbody, [date(o.timestamp_ms), o.symbol, o.side === 'buy' ? 'BELI' : 'JUAL', number(o.amount), money(o.price), money(o.fee_tax), money(o.pnl)]); $('history-empty').classList.toggle('hidden', orders.length > 0); }
