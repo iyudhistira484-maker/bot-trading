@@ -156,6 +156,17 @@ class PaperExecutor:
             decision, equity = self._risk(quotes, now_ms)
             self.db.execute("SAVEPOINT order_changes")
             risk_saved = True
+            # Serialize dashboard/Telegram pause and stop against order placement.
+            bot_state_exists = self.db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bot_state'"
+            ).fetchone()
+            if side == 'buy' and bot_state_exists:
+                flags = {r['key']: r['value'] for r in self.db.execute(
+                    "SELECT key,value FROM bot_state WHERE key IN ('paused','stopping')"
+                )}
+                if flags.get('paused', '0') == '1' or flags.get('stopping', '0') != '0':
+                    self.db.execute('COMMIT'); committed = True
+                    raise OrderRejected('Paused or stopping; entry blocked')
             # Save the risk state even if the order is rejected due to a limit.
             if side == 'buy' and not decision.allow_entry:
                 self.db.execute('COMMIT'); committed = True

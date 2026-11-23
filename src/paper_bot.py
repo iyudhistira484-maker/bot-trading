@@ -30,9 +30,14 @@ class PaperBot:
         self._stop_requested = True
 
     def _persist_stop_request(self) -> None:
-        if self._stop_requested and self._get('stopping', '0') == '0':
-            self._set('stopping', 'service')
-            event(self.log, 'stop_requested', source='signal')
+        if self._stop_requested:
+            # Do not overwrite an explicit stop arriving concurrently.
+            changed = self.db.execute(
+                "INSERT INTO bot_state(key,value) VALUES('stopping','service') "
+                "ON CONFLICT(key) DO UPDATE SET value='service' WHERE value='0'"
+            ).rowcount
+            if changed:
+                event(self.log, 'stop_requested', source='signal')
 
     def _get(self, key: str, default: str = '') -> str:
         row = self.db.execute('SELECT value FROM bot_state WHERE key=?', (key,)).fetchone()
@@ -115,6 +120,7 @@ class PaperBot:
             event(self.log, 'daily_summary', day=prior_day, equity_idr=self._get('last_equity', 'unknown'))
         self._set('summary_day', today)
         self._set('last_equity', f'{equity:.2f}')
+        self._set('last_equity_updated_at', datetime.fromtimestamp(now_ms / 1000, timezone.utc).isoformat())
         if now_ms - int(self._get('heartbeat_ms', '0')) >= self.config.runtime.heartbeat_seconds * 1000:
             event(self.log, 'heartbeat', equity_idr=equity)
             self._notify(self._status())
@@ -142,8 +148,11 @@ class PaperBot:
             # A fully completed systemd shutdown is temporary. Explicit /stop
             # and kill remain sticky; failed/incomplete shutdown stays latched.
             if stop_kind == 'service' and not decision.state.killed:
-                self._set('stopping', '0')
-                event(self.log, 'service_stop_completed')
+                changed = self.db.execute(
+                    "UPDATE bot_state SET value='0' WHERE key='stopping' AND value='service'"
+                ).rowcount
+                if changed:
+                    event(self.log, 'service_stop_completed')
             return True
         if self._get('paused', '0') == '1' or not decision.allow_entry:
             return False

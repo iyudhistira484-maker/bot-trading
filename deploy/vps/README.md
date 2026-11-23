@@ -78,3 +78,54 @@ Cockpit dapat menggunakan sertifikat self-signed. Jika browser memberi peringata
 ## 6. Langkah berikutnya
 
 Setelah panel bisa dibuka dan versi Python memenuhi syarat, file bot harus dipindahkan ke VPS. Contoh unit untuk **paper** tersedia di `deploy/vps/indodax-paper.service`; periksa path dan lakukan pengujian sebelum memasangnya. Unit memakai `Restart=on-failure`, bukan restart otomatis tanpa syarat, agar keluar normal setelah kill switch tidak langsung menghidupkan ulang proses. Stop lewat Cockpit meminta loop melikuidasi posisi virtual; jika tuntas dan kill tidak aktif, status stop sementara dihapus agar start berikutnya bisa berjalan. Ini best-effort: timeout atau kegagalan data dapat meninggalkan posisi terbuka dan status stop tertunda. Telegram `/stop` dan kill tetap perlu pemeriksaan dan reset manual; start/restart tidak menghapusnya. Kill state tetap perlu ditinjau secara manual. Network outage atau proses berhenti dapat meninggalkan posisi paper tidak terpantau; Cockpit bukan jaminan bot selalu berjalan. Mode live tetap diblokir hingga integrasi aman selesai dan diuji.
+
+## Dashboard paper via SSH tunnel
+
+Dashboard ini **terpisah dari Cockpit**, hanya melayani paper dan tidak menyediakan live. Ia mengikat `127.0.0.1:8765` di VPS; **jangan buka port 8765 ke internet**. Password dashboard berbeda dari password Linux. Data melewati SSH tunnel, tetapi halaman lokal memakai HTTP: orang atau aplikasi lain yang dapat mengakses perangkat lokal, browser, atau akun VPS tetap merupakan risiko. Gunakan perangkat tepercaya dan tutup tunnel saat tidak digunakan.
+
+Langkah ini disiapkan untuk instalasi setelah perubahan dashboard tersedia di branch dan tes di VPS lulus. Jangan menghentikan bot yang sedang berjalan tanpa memahami konsekuensi stop di atas. Menginstal dashboard sendiri tidak membutuhkan restart service paper.
+
+1. Di terminal VPS, dari folder proyek dan setelah memperbarui branch kerja dengan aman, jalankan tes sebagai pengguna bot:
+
+   ```bash
+   cd /home/indodaxbot/indodax-bot
+   sudo -u indodaxbot .venv/bin/python -m pytest -q
+   ```
+
+   Lanjutkan hanya jika semua tes lulus. Dashboard membaca database paper yang sudah ada; bila belum ada atau state tidak lengkap, ia akan menampilkan error alih-alih menciptakan saldo baru.
+
+2. Buat password dashboard **secara interaktif** di terminal VPS. Pilih minimal 16 karakter unik dan jangan ketik password ke chat atau ke baris perintah. Perintah ini tidak menampilkan password dan tidak menimpa hash yang sudah ada:
+
+   ```bash
+   cd /home/indodaxbot/indodax-bot
+   sudo -u indodaxbot .venv/bin/python -m src.dashboard setup
+   ```
+
+   Hash disimpan di `data/dashboard-auth.json` dengan izin 600; file ini tidak boleh diunggah ke GitHub. Untuk mengganti password, hentikan service dashboard, pindahkan atau hapus file hash lama **hanya setelah memastikan path benar**, jalankan setup lagi, lalu mulai dashboard kembali. Restart dashboard mengakhiri semua sesi.
+
+3. Pasang dan periksa unit dashboard (ini tidak memulai ulang bot paper):
+
+   ```bash
+   sudo systemd-analyze verify /home/indodaxbot/indodax-bot/deploy/vps/indodax-dashboard.service
+   sudo cp /home/indodaxbot/indodax-bot/deploy/vps/indodax-dashboard.service /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now indodax-dashboard.service
+   sudo systemctl status indodax-dashboard.service --no-pager
+   sudo ss -ltn '( sport = :8765 )'
+   ```
+
+   Pastikan hasil `ss` menunjukkan **hanya** `127.0.0.1:8765`. Jika tidak, hentikan dashboard dan periksa konfigurasi. Cek log dengan `journalctl -u indodax-dashboard.service -n 50 --no-pager`. Jika port sudah dipakai, jangan membuka service alternatif ke publik.
+
+4. Di perangkat lokal (bukan di shell VPS), buat local port forwarding SSH atau atur tunnel Termius: **local 8765 → remote 127.0.0.1:8765**. Contoh terminal:
+
+   ```bash
+   ssh -N -L 8765:127.0.0.1:8765 NAMA_PENGGUNA@IP_VPS
+   ```
+
+   Biarkan koneksi SSH aktif lalu buka `http://127.0.0.1:8765` pada perangkat yang menjalankan tunnel. Dashboard memvalidasi Host dan Origin sehingga gunakan alamat/port itu (atau `localhost:8765`); local port lain tidak didukung pada konfigurasi default. Jangan meneruskan local port ke seluruh jaringan atau membuka dashboard melalui reverse proxy publik. Jika memakai tombol Cockpit, tunnel Cockpit 9090 juga harus aktif di perangkat yang sama.
+
+5. Masuk, bandingkan saldo/posisi/riwayat dengan data bot, dan cek timestamp equity; equity adalah snapshot terakhir, **bukan harga real-time**. Status “service aktif” tidak menjamin heartbeat atau harga masih segar. Riwayat grafik hanya memakai sebagian log saat ini; bukan kurva historis lengkap. Waktu tampilan mengikuti perangkat lokal.
+
+**Kontrol:** Pause mencegah entry baru; exit dipantau hanya ketika bot dan data bekerja. Resume tidak menghapus stop atau kill. Stop dashboard meminta bot mencoba menjual posisi virtual lalu keluar; dapat gagal, jadi cek posisi dan log. Tombol reset stop hanya bekerja ketika bot berhenti, tidak ada posisi dan kill tidak aktif, dan tidak menyalakan bot. Start service dilakukan lewat Cockpit, bukan dari dashboard. Stop lewat Cockpit adalah permintaan shutdown service yang berbeda: setelah liquidasi tuntas, penanda shutdown sementara bisa dihapus; stop eksplisit dashboard tetap tertahan sampai direview dan direset. Jangan reset kill otomatis; ikuti prosedur manual setelah pemeriksaan.
+
+**Pengaturan:** perubahan hanya dapat disimpan saat proses bot tidak memegang lock, tidak ada posisi terbuka, dan kill tidak aktif. Nilai divalidasi (risiko per trade maksimum 2%) dan dipakai pada startup paper berikutnya; backtest tetap memakai YAML. Menghentikan bot untuk mengubah pengaturan bisa memicu penjualan virtual dan biaya. Batas, fee, slippage, dan perilaku paper bukan bukti parameter atau hasil live. Tidak ada strategi yang menjamin keuntungan.

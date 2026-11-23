@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 
 from src.config import load_config
 from src.data.market import MarketData
+from src.dashboard.store import effective_config
 from src.execution.live import LiveExecutor
 from src.execution.paper import PaperExecutor
 from src.notify.telegram import Telegram
@@ -76,6 +77,11 @@ def run_paper(args) -> int:
         except BlockingIOError:
             print('Another paper process holds the database lock.', file=sys.stderr)
             return 1
+        # Re-read under the same lock the dashboard uses for settings changes.
+        fresh_config = load_config(args.config)
+        if Path(fresh_config.runtime.paper_database) != db_path:
+            raise ValueError('Paper database changed during startup')
+        config = effective_config(fresh_config, db_path)
         exchange = ccxt.indodax({'enableRateLimit': True, 'timeout': config.market.timeout_ms})
         data = MarketData(exchange, config)
         data.load_markets()

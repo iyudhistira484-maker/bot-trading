@@ -11,3 +11,6 @@ logs/
 
 # Generated deployment archives
 artifacts/
+
+# Local dashboard password hash
+data/dashboard-auth.json
