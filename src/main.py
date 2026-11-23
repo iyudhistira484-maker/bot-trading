@@ -23,6 +23,7 @@ def parser_for_paper():
     parser.add_argument('--config', default='config/config.yaml')
     parser.add_argument('--reset-stop', action='store_true', help='clear a previous stop after manual review')
     parser.add_argument('--reset-kill', action='store_true', help='reset kill only with no open positions, after manual review')
+    parser.add_argument('--reset-only', action='store_true', help='perform a requested reset and exit without starting paper')
     return parser
 
 
@@ -86,6 +87,9 @@ def run_paper(args) -> int:
             telegram = Telegram(token, chat) if token and chat else None
             bot = PaperBot(executor, data, config, logger, telegram)
             reset_state(bot, args.reset_stop, args.reset_kill)
+            if args.reset_only:
+                print('Paper state reset completed; bot was not started.')
+                return 0
             previous_sigterm = signal.signal(signal.SIGTERM, lambda _signum, _frame: bot.request_stop())
             try:
                 bot.run()
@@ -111,7 +115,10 @@ def main(argv: list[str] | None = None) -> int:
         backtest(argv)
         return 0
     if mode == 'paper':
-        args = parser_for_paper().parse_args(argv)
+        parser = parser_for_paper()
+        args = parser.parse_args(argv)
+        if args.reset_only and not (args.reset_stop or args.reset_kill):
+            parser.error('--reset-only requires --reset-stop or --reset-kill')
         try:
             return run_paper(args)
         except Exception as exc:

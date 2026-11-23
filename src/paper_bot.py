@@ -30,8 +30,8 @@ class PaperBot:
         self._stop_requested = True
 
     def _persist_stop_request(self) -> None:
-        if self._stop_requested and self._get('stopping', '0') != '1':
-            self._set('stopping', '1')
+        if self._stop_requested and self._get('stopping', '0') == '0':
+            self._set('stopping', 'service')
             event(self.log, 'stop_requested', source='signal')
 
     def _get(self, key: str, default: str = '') -> str:
@@ -65,7 +65,7 @@ class PaperBot:
             self.db.execute('BEGIN IMMEDIATE')
             try:
                 if cmd == '/pause': self._set('paused', '1')
-                if cmd == '/resume' and self._get('stopping', '0') != '1': self._set('paused', '0')
+                if cmd == '/resume' and self._get('stopping', '0') == '0': self._set('paused', '0')
                 if cmd == '/stop': self._set('stopping', '1')
                 self._set('telegram_offset', str(update_id + 1))
                 self.db.execute('COMMIT')
@@ -127,7 +127,8 @@ class PaperBot:
                 event(self.log, 'signal', symbol=symbol, candle_ms=int(candle), entry=bool(row['entry']), exit=bool(row['exit']))
                 self._set(key, candle)
         positions = self.executor.balances()['positions']
-        stopping = self._get('stopping', '0') == '1'
+        stop_kind = self._get('stopping', '0')
+        stopping = stop_kind != '0'
         for symbol, position in positions.items():
             q, row = quotes[symbol], signals[symbol]
             reason = ('kill' if decision.state.killed else 'stop_command' if stopping else
@@ -136,7 +137,14 @@ class PaperBot:
             if reason:
                 self._sell(symbol, position, reason, quotes, now_ms)
         if decision.state.killed or stopping:
-            return not self.executor.balances()['positions']
+            if self.executor.balances()['positions']:
+                return False
+            # A fully completed systemd shutdown is temporary. Explicit /stop
+            # and kill remain sticky; failed/incomplete shutdown stays latched.
+            if stop_kind == 'service' and not decision.state.killed:
+                self._set('stopping', '0')
+                event(self.log, 'service_stop_completed')
+            return True
         if self._get('paused', '0') == '1' or not decision.allow_entry:
             return False
         interval_ms = self.executor.exchange.parse_timeframe(self.config.market.timeframe) * 1000
@@ -184,7 +192,7 @@ class PaperBot:
             try:
                 if self.run_once(int(time.time() * 1000)):
                     event(self.log, 'stopped', reason='kill_or_stop')
-                    self._notify('PAPER stopped after liquidation; manual restart/review required.')
+                    self._notify('PAPER stopped after liquidation; review state before restarting.')
                     return
             except Exception as exc:
                 self._persist_stop_request()

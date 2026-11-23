@@ -189,7 +189,7 @@ def test_service_stop_request_liquidates_and_is_sticky(context):
     bot.request_stop()
     assert bot.run_once(now + 1) is True
     assert not bot.executor.balances()['positions']
-    assert bot._get('stopping') == '1'
+    assert bot._get('stopping') == '0'
     assert bot.db.execute('SELECT COUNT(*) AS n FROM orders').fetchone()['n'] == 2
 
 
@@ -200,7 +200,7 @@ def test_stop_request_persists_even_if_data_unavailable(context):
     data.snapshot = lambda _: (_ for _ in ()).throw(TimeoutError())
     with pytest.raises(TimeoutError):
         bot.run_once(now + 1)
-    assert bot._get('stopping') == '1'
+    assert bot._get('stopping') == 'service'
     assert bot.executor.balances()['positions']
 
 
@@ -212,5 +212,73 @@ def test_stop_request_during_data_fetch_prevents_entry(context):
         return original(ts)
     data.snapshot = snapshot_with_stop
     assert bot.run_once(now) is True
-    assert bot._get('stopping') == '1'
+    assert bot._get('stopping') == '0'
     assert not bot.executor.balances()['positions']
+
+
+def test_incomplete_service_stop_remains_latched_until_liquidation(context):
+    bot, data, tg, now = context
+    bot.run_once(now)
+    bot.request_stop()
+    original = data.snapshot
+    data.snapshot = lambda _: (_ for _ in ()).throw(TimeoutError())
+    with pytest.raises(TimeoutError):
+        bot.run_once(now + 1)
+    assert bot._get('stopping') == 'service'
+    bot._stop_requested = False  # simulate restart from the persisted database
+    data.snapshot = original
+    assert bot.run_once(now + 2) is True
+    assert not bot.executor.balances()['positions']
+    assert bot._get('stopping') == '0'
+
+
+def test_kill_remains_latched_when_service_stop_completes(context):
+    bot, data, tg, now = context
+    bot.run_once(now)
+    bot.db.execute('UPDATE risk_state SET peak=20000')
+    bot.request_stop()
+    assert bot.run_once(now + 1) is True
+    assert bot._get('stopping') == 'service'
+    assert bot.db.execute('SELECT killed FROM risk_state').fetchone()['killed'] == 1
+
+
+def test_telegram_stop_is_not_cleared_by_service_shutdown(context):
+    bot, data, tg, now = context
+    tg.queue.append({'update_id': 1, 'cmd': '/stop'})
+    bot.request_stop()
+    assert bot.run_once(now) is True
+    assert bot._get('stopping') == '1'
+
+
+def test_reset_only_requires_an_explicit_reset():
+    with pytest.raises(SystemExit) as exc:
+        main(['paper', '--reset-only'])
+    assert exc.value.code == 2
+
+
+def test_reset_only_clears_stop_without_starting_loop(tmp_path, monkeypatch, capsys):
+    from src import main as app
+    from src.execution.paper import PaperExecutor
+    cfg = load_config()
+    cfg.runtime.paper_database = str(tmp_path / 'paper.sqlite')
+    cfg.runtime.log_file = str(tmp_path / 'log.jsonl')
+    exe = PaperExecutor(cfg.runtime.paper_database, Exchange(), cfg, initial_cash=10000)
+    old_bot = PaperBot(exe, Data(int(datetime.now(timezone.utc).timestamp() * 1000)), cfg, logging.Logger('test'))
+    old_bot._set('stopping', '1')
+    exe.close()
+    class Feed:
+        def __init__(self, exchange, config): pass
+        def load_markets(self): pass
+    monkeypatch.setattr(app, 'load_config', lambda _: cfg)
+    monkeypatch.setattr(app, 'load_dotenv', lambda: False)
+    monkeypatch.setattr(app, 'MarketData', Feed)
+    monkeypatch.setattr(app.ccxt, 'indodax', lambda _: Exchange())
+    monkeypatch.setattr(app, 'confirm', lambda _: True)
+    monkeypatch.delenv('TELEGRAM_BOT_TOKEN', raising=False)
+    monkeypatch.delenv('TELEGRAM_CHAT_ID', raising=False)
+    monkeypatch.setattr(app.PaperBot, 'run', lambda self: (_ for _ in ()).throw(AssertionError('must not start')))
+    assert app.main(['paper', '--reset-stop', '--reset-only']) == 0
+    assert 'bot was not started' in capsys.readouterr().out
+    import sqlite3
+    with sqlite3.connect(cfg.runtime.paper_database) as db:
+        assert db.execute("SELECT value FROM bot_state WHERE key='stopping'").fetchone()[0] == '0'

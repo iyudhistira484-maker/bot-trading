@@ -73,7 +73,7 @@ sys.exit(m.main(['paper', '--config', sys.argv[1]]))
         _, stderr = proc.communicate(timeout=15)
         assert proc.returncode == 0, stderr
         with sqlite3.connect(config['runtime']['paper_database']) as db:
-            assert db.execute("SELECT value FROM bot_state WHERE key='stopping'").fetchone()[0] == '1'
+            assert db.execute("SELECT value FROM bot_state WHERE key='stopping'").fetchone()[0] == '0'
     finally:
         if proc.poll() is None:
             proc.kill()
