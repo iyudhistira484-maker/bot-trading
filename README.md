@@ -68,3 +68,11 @@ Contoh unit systemd ada di `deploy/vps/indodax-paper.service`, tetapi tidak otom
 ### Dashboard paper lokal
 
 Dashboard Home, posisi, riwayat, kontrol paper, dan pengaturan strategi/risiko tersedia melalui SSH tunnel saja. Lihat [panduan instalasi dan batasannya](deploy/vps/README.md#dashboard-paper-via-ssh-tunnel). Login dashboard memakai password terpisah; jangan buka port dashboard ke publik. Equity adalah snapshot terakhir, bukan data real-time. Dashboard tidak menyalakan service, tidak mendukung live, dan stop/exit adalah best-effort yang memerlukan pemeriksaan posisi dan log.
+
+### Eksperimen offline: biaya dibanding jarak stop
+
+Eksperimen terpisah `python -m src.research.cost_atr --report PATH_REPORT` membandingkan baseline terhadap satu hipotesis filter entry, hanya pada **segmen in-sample** report yang sudah ada. Ia membaca `candles.csv` dan `config_used.yaml` dari report, tanpa permintaan jaringan, perubahan file report, database, konfigurasi, atau bot. Pilih report/pair dengan benar; ini bukan fitur dashboard atau live. Pastikan hasil baseline sesuai dengan report asal sebelum menafsirkan perbandingan.
+
+Pada sinyal candle yang sudah tutup, filter memperkirakan biaya satu putaran beli-jual pada harga close tersebut dengan fee/pajak taker dan slippage pada konfigurasi, tanpa spread. Rasio biaya per unit terhadap jarak stop `ATR × atr_stop_multiplier` harus **≤ 0,50**. Batas 0,50 adalah hipotesis tetap yang dipilih setelah hasil sebelumnya dilihat, bukan batas keamanan, nilai optimal, atau rekomendasi; estimasi bukan harga eksekusi aktual. Exit dan manajemen risiko tidak diubah. Jumlah sinyal ditampilkan sebelum simulasi; diblokirnya suatu sinyal tidak selalu berarti satu transaksi berkurang karena urutan dan posisi saling memengaruhi.
+
+Eksperimen ini eksploratif dan **bukan uji buta**: hasil periode ini dan sebagian out-of-sample sudah pernah dilihat. Jangan memilih filter berdasarkan hasil satu periode atau menganggap output sebagai bukti keuntungan. Evaluasi lanjutan memerlukan rancangan yang dibekukan sebelum data baru, termasuk pengujian pada periode masa depan yang belum dipakai memilih parameter. Backtest tidak memodelkan spread aktual, likuiditas, minimum order atau partial fills dan tidak menjamin hasil riil. Bot paper dan live tidak menggunakan filter ini.
