@@ -229,3 +229,68 @@ def test_dashboard_unit_is_unprivileged_and_paper_only():
     assert service['group'] == 'indodaxbot'
     assert service['execstart'].endswith('-m src.dashboard serve')
     assert service['nonewprivileges'] == 'true'
+
+
+def test_http_controls_drive_isolated_paper_loop(setup, tmp_path):
+    """End-to-end with fake market data, separate from any real bot/account."""
+    import pandas as pd
+
+    store, ex, bot, cfg = setup
+    now = int(time.time() * 1000) // 3_600_000 * 3_600_000 + 1000
+    close = now // 3_600_000 * 3_600_000
+
+    class Feed:
+        def snapshot(self, _):
+            q = Quote(99, 101, 100, now, close, 100)
+            frame = pd.DataFrame({'timestamp': [pd.to_datetime(close-3_600_000, unit='ms', utc=True)],
+                                  'entry': [True], 'exit': [False], 'atr': [5.]})
+            return {'BTC/IDR': q}, {'BTC/IDR': frame}
+    class Strategy:
+        def signals(self, frame): return frame
+
+    bot.data = Feed()
+    bot.strategy = Strategy()
+    bot.clock = lambda: now / 1000
+    path = tmp_path / 'auth-e2e.json'
+    write_password(path, 'unique test password')
+    server = DashboardServer(0, Auth(path), store)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    port = server.server_address[1]
+    origin = f'http://127.0.0.1:{port}'
+
+    def request(method, endpoint, body=None, headers=None):
+        conn = http.client.HTTPConnection('127.0.0.1', port, timeout=5)
+        try:
+            conn.request(method, endpoint, body=body, headers=headers or {})
+            response = conn.getresponse()
+            return response.status, dict(response.getheaders()), json.loads(response.read())
+        finally:
+            conn.close()
+
+    try:
+        headers = {'Content-Type': 'application/json', 'Origin': origin}
+        code, response_headers, _ = request('POST', '/api/login', json.dumps({'password': 'unique test password'}), headers)
+        assert code == 200
+        cookie = response_headers['Set-Cookie'].split(';', 1)[0]
+        code, _, data = request('GET', '/api/session', headers={'Cookie': cookie})
+        assert code == 200
+        authorized = headers | {'Cookie': cookie, 'X-CSRF-Token': data['csrf']}
+        def control(action):
+            return request('POST', '/api/control', json.dumps({'action': action}), authorized)[0]
+
+        assert control('pause') == 200
+        assert bot.run_once(now) is False
+        assert not ex.balances()['positions']
+        assert control('resume') == 200
+        assert bot.run_once(now) is False
+        assert len(ex.balances()['positions']) == 1
+        assert control('stop') == 200
+        assert bot.run_once(now) is True
+        assert not ex.balances()['positions']
+        assert bot._get('stopping') == '1'  # Explicit stop remains sticky.
+        assert [entry['side'] for entry in store.history()] == ['sell', 'buy']
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
