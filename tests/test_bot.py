@@ -282,3 +282,41 @@ def test_reset_only_clears_stop_without_starting_loop(tmp_path, monkeypatch, cap
     import sqlite3
     with sqlite3.connect(cfg.runtime.paper_database) as db:
         assert db.execute("SELECT value FROM bot_state WHERE key='stopping'").fetchone()[0] == '0'
+
+
+def test_bot_sizes_entry_to_fee_inclusive_cap(context):
+    bot, data, tg, now = context
+    bot.config.risk.max_capital_idr = 150
+    bot.run_once(now)
+    position = bot.executor.balances()['positions']['BTC/IDR']
+    row = bot.db.execute('SELECT result FROM orders WHERE client_id=?', (position['entry_id'],)).fetchone()
+    import json
+    order = json.loads(row['result'])
+    assert 0 < order['amount'] * order['price'] + order['fee_tax'] <= 150
+    assert bot.executor.remaining_entry_capital() >= 0
+
+
+def test_bot_skips_when_cap_below_market_minimum(context):
+    bot, data, tg, now = context
+    bot.config.risk.max_capital_idr = 1
+    bot.run_once(now)
+    assert bot.executor.balances()['positions'] == {}
+    assert bot.db.execute('SELECT COUNT(*) AS n FROM orders').fetchone()['n'] == 0
+
+
+def test_bot_caps_total_across_pairs_not_each_pair(context):
+    bot, data, tg, now = context
+    bot.config.market.pairs.append('ETH/IDR')
+    bot.config.risk.max_capital_idr = 250
+    snapshot = data.snapshot
+    def both(timestamp):
+        quotes, frames = snapshot(timestamp)
+        quotes['ETH/IDR'] = quotes['BTC/IDR']
+        frames['ETH/IDR'] = frames['BTC/IDR'].copy()
+        return quotes, frames
+    data.snapshot = both
+    bot.run_once(now)
+    import json
+    orders = [json.loads(row['result']) for row in bot.db.execute('SELECT result FROM orders')]
+    assert len(orders) >= 1
+    assert sum(o['amount'] * o['price'] + o['fee_tax'] for o in orders) <= 250

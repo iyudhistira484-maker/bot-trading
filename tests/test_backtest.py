@@ -122,3 +122,26 @@ def test_backtest_separate_buy_and_sell_costs(candles, config):
     expected = trade.amount * (trade.exit_price * .99 - trade.entry_price * 1.003)
     assert trade.pnl == pytest.approx(expected)
     assert result.equity.equity.iloc[-1] == pytest.approx(config.backtest.initial_equity_idr + expected)
+
+
+def test_backtest_caps_invested_cost_including_fees(candles, config):
+    config.risk.max_capital_idr = 150
+    s = make_signals(candles); s.loc[0, 'entry'] = True
+    result = simulate(s, config)
+    trade = result.trades.iloc[0]
+    cost = trade.amount * trade.entry_price + trade.entry_fee_tax
+    assert 0 < cost <= 150
+    assert cost == pytest.approx(150)
+
+
+def test_backtest_cap_applies_again_after_profit(candles, config):
+    config.risk.max_capital_idr = 150
+    s = make_signals(candles)
+    s.loc[0, 'entry'] = True
+    s.loc[1, 'high'] = 125
+    s.loc[2, 'entry'] = True
+    result = simulate(s, config)
+    assert len(result.trades) == 2
+    assert result.trades.iloc[0].pnl > 0
+    for _, trade in result.trades.iterrows():
+        assert trade.amount * trade.entry_price + trade.entry_fee_tax <= 150

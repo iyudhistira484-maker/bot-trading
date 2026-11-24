@@ -116,3 +116,104 @@ def test_paper_uses_separate_buy_sell_rates_for_fill_and_equity(paper, quote, no
     sell = paper.place_order('asym-sell', 'BTC/IDR', 'sell', 1, None, quotes, now)
     assert sell['fee_tax'] == pytest.approx(sell['price'] * .01)
     assert paper.balances()['IDR'] == pytest.approx(cash + sell['price'] * .99)
+
+
+def test_cap_enforced_across_pairs_including_entry_fees_and_released_on_exit(paper, quote, now):
+    paper.config.market.pairs.append('ETH/IDR')
+    paper.config.risk.max_capital_idr = 150
+    q = {'BTC/IDR': quote, 'ETH/IDR': quote}
+    first = paper.place_order('cap-first', 'BTC/IDR', 'buy', 1, 90, q, now)
+    invested = first['amount'] * first['price'] + first['fee_tax']
+    assert paper.remaining_entry_capital() == pytest.approx(150 - invested)
+    before = paper.balances()
+    with pytest.raises(OrderRejected, match='Maximum invested capital'):
+        paper.place_order('cap-denied', 'ETH/IDR', 'buy', .5, 90, q, now)
+    assert paper.balances() == before
+    second = paper.place_order('cap-second', 'ETH/IDR', 'buy', .4, 90, q, now)
+    combined = invested + second['amount'] * second['price'] + second['fee_tax']
+    assert combined <= 150
+    paper.place_order('cap-exit', 'BTC/IDR', 'sell', 1, None, q, now)
+    assert paper.remaining_entry_capital() == pytest.approx(150 - (second['amount'] * second['price'] + second['fee_tax']))
+
+
+def test_cap_counts_fees_and_allows_exit_if_cap_lowered(paper, quote, now):
+    paper.config.risk.max_capital_idr = 101.2  # Gross < cap, but gross + fees > cap.
+    with pytest.raises(OrderRejected, match='Maximum invested capital'):
+        paper.place_order('fee-limit', 'BTC/IDR', 'buy', 1, 90, {'BTC/IDR': quote}, now)
+    paper.config.risk.max_capital_idr = 200
+    paper.place_order('fee-allowed', 'BTC/IDR', 'buy', 1, 90, {'BTC/IDR': quote}, now)
+    paper.config.risk.max_capital_idr = 1
+    assert paper.remaining_entry_capital() == 0
+    paper.place_order('cap-lowered-exit', 'BTC/IDR', 'sell', 1, None, {'BTC/IDR': quote}, now)
+    assert not paper.balances()['positions']
+
+
+def test_missing_or_corrupt_old_entry_blocks_new_buys_not_sells(paper, quote, now):
+    paper.config.market.pairs.append('ETH/IDR')
+    q = {'BTC/IDR': quote, 'ETH/IDR': quote}
+    paper.place_order('old-entry', 'BTC/IDR', 'buy', 1, 90, q, now)
+    paper.db.execute("UPDATE orders SET result=? WHERE client_id='old-entry'", ('{}',))
+    with pytest.raises(OrderRejected, match='entry cost unavailable'):
+        paper.place_order('new-entry', 'ETH/IDR', 'buy', 1, 90, q, now)
+    paper.db.execute("DELETE FROM orders WHERE client_id='old-entry'")
+    with pytest.raises(OrderRejected, match='entry cost unavailable'):
+        paper.remaining_entry_capital()
+    paper.place_order('old-exit', 'BTC/IDR', 'sell', 1, None, q, now)
+    assert not paper.balances()['positions']
+
+
+def test_cap_transaction_serializes_competing_purchases(tmp_path, config, quote, now):
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    config.market.pairs.append('ETH/IDR')
+    config.risk.max_capital_idr = 150
+    path = tmp_path / 'race.sqlite'
+    initial = PaperExecutor(path, FakeExchange(), config, initial_cash=10000)
+    initial.close()
+    barrier = threading.Barrier(2)
+    def buy(symbol):
+        executor = PaperExecutor(path, FakeExchange(), config, initial_cash=10000)
+        try:
+            barrier.wait(timeout=10)
+            q = {'BTC/IDR': quote, 'ETH/IDR': quote}
+            try:
+                executor.place_order('race-' + symbol, symbol, 'buy', 1, 90, q, now)
+                return 'filled'
+            except OrderRejected as e:
+                assert 'Maximum invested capital' in str(e)
+                return 'blocked'
+        finally:
+            executor.close()
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(buy, ['BTC/IDR', 'ETH/IDR']))
+    assert sorted(results) == ['blocked', 'filled']
+    reader = PaperExecutor(path, FakeExchange(), config, initial_cash=10000)
+    try:
+        assert len(reader.balances()['positions']) == 1
+        assert 0 <= reader.remaining_entry_capital() < 50
+    finally:
+        reader.close()
+
+
+def test_open_cost_cap_persists_on_restart_and_does_not_count_market_appreciation(tmp_path, paper, quote, now, config):
+    paper.config.market.pairs.append('ETH/IDR')
+    paper.config.risk.max_capital_idr = 150
+    original_q = {'BTC/IDR': quote, 'ETH/IDR': quote}
+    buy = paper.place_order('restart-cap', 'BTC/IDR', 'buy', 1, 90, original_q, now)
+    remaining = 150 - buy['price'] * buy['amount'] - buy['fee_tax']
+    paper.close()
+    paper.db = PaperExecutor(tmp_path / 'paper.sqlite', FakeExchange(), config).db
+    # Market appreciation changes equity, not the stored purchase-cost basis.
+    high = Quote(149, 151, 150, now, now-1000, 150)
+    q = {'BTC/IDR': high, 'ETH/IDR': quote}
+    assert paper.remaining_entry_capital() == pytest.approx(remaining)
+    assert paper.place_order('restart-second', 'ETH/IDR', 'buy', .4, 90, q, now)['status'] == 'closed'
+
+
+def test_replaying_same_client_id_does_not_double_count_cap(paper, quote, now):
+    paper.config.risk.max_capital_idr = 150
+    q = {'BTC/IDR': quote}
+    original = paper.place_order('same-cap', 'BTC/IDR', 'buy', 1, 90, q, now)
+    before = paper.remaining_entry_capital()
+    assert paper.place_order('same-cap', 'BTC/IDR', 'buy', 1, 90, q, now) == original
+    assert paper.remaining_entry_capital() == before

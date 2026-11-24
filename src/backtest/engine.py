@@ -89,8 +89,11 @@ def simulate(signals: pd.DataFrame, config: Config, start: int = 0, end: int | N
             stop = entry - atr * config.strategy.atr_stop_multiplier
             if math.isfinite(atr) and atr > 0 and stop > 0:
                 target = entry + (entry - stop) * config.strategy.risk_reward
+                # One position at a time: its entry cost, including buy fees,
+                # must fit the configured capital cap as well as available cash.
+                budget = min(cash, math.nextafter(risk.max_capital_idr, 0.0))
                 qty = position_size(cash, entry, stop, risk.risk_per_trade, cfg.taker_buy_fee_rate,
-                                    cfg.buy_tax_rate, slip, cash,
+                                    cfg.buy_tax_rate, slip, budget,
                                     sell_fee_rate=cfg.taker_sell_fee_rate, sell_tax_rate=cfg.sell_tax_rate)
                 if qty > 0:
                     fee = qty * entry * buy_rate

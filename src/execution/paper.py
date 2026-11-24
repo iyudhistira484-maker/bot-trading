@@ -81,6 +81,42 @@ class PaperExecutor:
         return {'IDR': self.db.execute('SELECT cash FROM account WHERE id=1').fetchone()['cash'],
                 'positions': {r['symbol']: dict(r) for r in self.db.execute('SELECT * FROM positions')}}
 
+    def remaining_entry_capital(self) -> float:
+        """Cost-basis cap across open paper positions, including entry fees.
+
+        Open positions created before reliable entry records existed cannot be
+        valued safely: block new buys, but do not prevent sells. Caller sizing
+        is advisory; place_order repeats this check inside its write transaction.
+        """
+        costs = []
+        rows = self.db.execute("""SELECT p.symbol, p.amount, p.entry_price, p.entry_id, o.result
+            FROM positions p LEFT JOIN orders o ON o.client_id=p.entry_id""")
+        for row in rows:
+            try:
+                result = json.loads(row['result'])
+                amount = float(row['amount'])
+                price = float(row['entry_price'])
+                fee = float(result['fee_tax'])
+                if (result['client_id'] != row['entry_id'] or result['side'] != 'buy'
+                        or result['status'] != 'closed' or result['symbol'] != row['symbol']
+                        or float(result['amount']) != amount
+                        or float(result['price']) != price or not all(math.isfinite(v) for v in (amount, price, fee))
+                        or amount <= 0 or price <= 0 or fee < 0):
+                    raise ValueError('Invalid entry record')
+                cost = amount * price + fee
+                if not math.isfinite(cost) or cost <= 0:
+                    raise ValueError('Invalid position cost')
+                costs.append(cost)
+            except (TypeError, ValueError, KeyError, OverflowError) as exc:
+                raise OrderRejected('Open position entry cost unavailable; new buys blocked') from exc
+        try:
+            spent = math.fsum(costs)
+        except OverflowError as exc:
+            raise OrderRejected('Open position entry cost unavailable; new buys blocked') from exc
+        if not math.isfinite(spent):
+            raise OrderRejected('Open position entry cost unavailable; new buys blocked')
+        return max(0.0, self.config.risk.max_capital_idr - spent)
+
     def _validate_quote(self, q: Quote, now_ms: int, entry: bool = False) -> None:
         checks = (q.bid, q.ask, q.last, q.candle_close_price)
         cfg = self.config.execution
@@ -216,6 +252,9 @@ class PaperExecutor:
             if side == 'buy':
                 if existing:
                     raise OrderRejected('Position already open; averaging down prohibited')
+                # This second, transactional check is authoritative across all pairs.
+                if gross + fee > self.remaining_entry_capital():
+                    raise OrderRejected('Maximum invested capital exceeded')
                 if stop is None or not 0 < stop < price:
                     raise OrderRejected('Valid stop required')
                 max_amount = position_size(equity, price, stop, self.config.risk.risk_per_trade,

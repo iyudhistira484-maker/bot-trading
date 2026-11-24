@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import time
 from datetime import datetime, timezone
 
@@ -178,9 +179,12 @@ class PaperBot:
                 if not current_decision.allow_entry:
                     continue
                 balance = self.executor.balances()['IDR']
+                remaining = self.executor.remaining_entry_capital()
+                # Round down by one float step to keep strict fee-inclusive cap.
+                budget = min(balance, math.nextafter(remaining, 0.0))
                 amount = position_size(current_equity, price, stop, self.config.risk.risk_per_trade,
                                        self.config.execution.taker_buy_fee_rate, self.config.execution.buy_tax_rate,
-                                       self.config.execution.slippage_rate, balance,
+                                       self.config.execution.slippage_rate, budget,
                                        sell_fee_rate=self.config.execution.taker_sell_fee_rate,
                                        sell_tax_rate=self.config.execution.sell_tax_rate)
                 amount = float(self.executor.exchange.amount_to_precision(symbol, amount))

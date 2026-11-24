@@ -34,6 +34,7 @@ def write_report(in_sample: Result, out_sample: Result, config: Config, path: st
     lines = ['# Backtest report', '', 'Independent segments: both start with the same capital; indicators use earlier candles for warmup.',
              'Signals execute at the next open; bar-level stop is pessimistic when stop and target both hit.',
              'Costs: configurable taker fee and tax separately on buy and sell, plus slippage; check configured rates. No liquidity or order-book model.',
+             'Capital cap limits open position entry cost including buy fee/tax; backtest does not model exchange minimums or precision.',
              'Daily loss blocks entries until the next UTC day. Drawdown kill is sticky; positions are liquidated at the next open after a close-based breach. Intrabar breaches are not observed.', '',
              '| Metric | In-sample | Out-of-sample |', '|---|---:|---:|']
     for key in inside:
